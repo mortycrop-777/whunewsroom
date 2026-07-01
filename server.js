@@ -3,6 +3,7 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
+const multer = require('multer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -140,6 +141,20 @@ for (const c of classroomsData) {
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// multer 配置（文件上传）
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ext === '.csv' || ext === '.xlsx' || ext === '.xls') {
+      cb(null, true);
+    } else {
+      cb(new Error('仅支持 CSV 或 Excel 文件'));
+    }
+  }
+});
+
 // ========== 日志记录中间件 ==========
 function logOperation(userId, action, targetType, targetId, details) {
   db.prepare('INSERT INTO operation_logs (id, user_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?, ?)').run(
@@ -204,6 +219,172 @@ app.post('/api/register', (req, res) => {
   logOperation(id, 'register', 'user', id, null);
   res.json({ success: true, user: { id, username, name, role, department, phone } });
 });
+
+// ========== 批量导入用户API ==========
+app.post('/api/users/batch-register', upload.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.json({ success: false, message: '请上传文件' });
+  }
+
+  const { adminId } = req.body;
+  if (!adminId) {
+    return res.json({ success: false, message: '缺少管理员ID' });
+  }
+
+  // 检查管理员权限
+  const admin = db.prepare('SELECT * FROM users WHERE id = ? AND role = ?').get(adminId, 'admin');
+  if (!admin) {
+    return res.json({ success: false, message: '仅管理员可执行批量导入' });
+  }
+
+  const fileBuffer = req.file.buffer;
+  const fileName = req.file.originalname;
+  const ext = path.extname(fileName).toLowerCase();
+
+  let rows = [];
+
+  try {
+    if (ext === '.csv') {
+      // CSV 解析
+      const content = fileBuffer.toString('utf-8');
+      const lines = content.split(/\r?\n/).filter(line => line.trim());
+      if (lines.length < 2) {
+        return res.json({ success: false, message: 'CSV文件内容不足（至少需标题行+1条数据）' });
+      }
+      // 跳过标题行
+      const headerLine = lines[0];
+      const headers = parseCSVLine(headerLine);
+      // 标题映射：支持中英文列名
+      const headerMap = {
+        '姓名': 'name', 'name': 'name',
+        '学号': 'studentId', '工号': 'studentId', 'student_id': 'studentId', 'studentid': 'studentId', 'id': 'studentId',
+        '手机号': 'phone', '电话': 'phone', 'phone': 'phone', 'mobile': 'phone',
+        '部门': 'department', '班级': 'department', '所属部门': 'department', 'department': 'department', 'class': 'department'
+      };
+
+      const mappedHeaders = headers.map(h => {
+        const lower = h.trim().toLowerCase();
+        return headerMap[lower] || headerMap[h.trim()] || null;
+      });
+
+      // 检查必要列
+      const hasName = mappedHeaders.includes('name');
+      const hasStudentId = mappedHeaders.includes('studentId');
+      if (!hasName || !hasStudentId) {
+        return res.json({ success: false, message: 'CSV文件必须包含"姓名"和"学号/工号"列' });
+      }
+
+      for (let i = 1; i < lines.length; i++) {
+        const values = parseCSVLine(lines[i]);
+        const row = {};
+        mappedHeaders.forEach((key, idx) => {
+          if (key) row[key] = values[idx] ? values[idx].trim() : '';
+        });
+        row._line = i + 1; // 原始行号（含标题行）
+        rows.push(row);
+      }
+    } else {
+      // Excel (.xlsx/.xls) 需要额外库，这里提示使用 CSV
+      return res.json({ success: false, message: '当前版本仅支持CSV文件格式，请将Excel另存为CSV后上传' });
+    }
+  } catch (err) {
+    return res.json({ success: false, message: `文件解析失败：${err.message}` });
+  }
+
+  // 数据校验与批量插入
+  const results = { success: 0, failed: 0, total: rows.length, errors: [] };
+  const existingUsers = db.prepare('SELECT username FROM users').all().map(u => u.username);
+
+  const insertStmt = db.prepare(
+    'INSERT INTO users (id, username, password, name, department, phone, role) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  );
+
+  const insertMany = db.transaction((rows) => {
+    for (const row of rows) {
+      const lineNum = row._line;
+      // 必填校验
+      if (!row.name) {
+        results.failed++;
+        results.errors.push({ line: lineNum, name: row.studentId || '未知', error: '姓名为空' });
+        continue;
+      }
+      if (!row.studentId) {
+        results.failed++;
+        results.errors.push({ line: lineNum, name: row.name, error: '学号/工号为空' });
+        continue;
+      }
+
+      // 学号格式校验（仅允许字母数字）
+      if (!/^[\w]+$/.test(row.studentId)) {
+        results.failed++;
+        results.errors.push({ line: lineNum, name: row.name, error: `学号格式异常：${row.studentId}（仅允许字母数字下划线）` });
+        continue;
+      }
+
+      // 重复检测
+      if (existingUsers.includes(row.studentId)) {
+        results.failed++;
+        results.errors.push({ line: lineNum, name: row.name, error: `学号 ${row.studentId} 已存在` });
+        continue;
+      }
+
+      // 手机号格式校验（可选字段，如果填写了就验证）
+      if (row.phone && !/^1[3-9]\d{9}$/.test(row.phone)) {
+        results.failed++;
+        results.errors.push({ line: lineNum, name: row.name, error: `手机号格式异常：${row.phone}` });
+        continue;
+      }
+
+      // 密码默认为学号
+      const hashedPw = bcrypt.hashSync(row.studentId, 10);
+      const id = uuidv4();
+
+      try {
+        insertStmt.run(id, row.studentId, hashedPw, row.name, row.department || '', row.phone || '', 'user');
+        existingUsers.push(row.studentId); // 防止文件内重复
+        results.success++;
+      } catch (err) {
+        results.failed++;
+        results.errors.push({ line: lineNum, name: row.name, error: `数据库写入失败：${err.message}` });
+      }
+    }
+  });
+
+  insertMany(rows);
+
+  // 记录操作日志
+  logOperation(adminId, 'batch_register', 'user', 'batch', {
+    total: results.total, success: results.success, failed: results.failed,
+    file: fileName
+  });
+
+  res.json({ success: true, results });
+});
+
+// CSV行解析（处理逗号分隔和引号包裹）
+function parseCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      result.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current);
+  return result;
+}
 
 // ========== 教室API ==========
 
@@ -577,7 +758,7 @@ app.get('/user', (req, res) => res.sendFile(path.join(__dirname, 'public', 'user
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin', 'index.html')));
 
 app.listen(PORT, () => {
-  console.log(`教室借用管理系统已启动: http://localhost:${PORT}`);
+  console.log(`新闻院教室借用管理系统已启动: http://localhost:${PORT}`);
   console.log(`用户端入口: http://localhost:${PORT}/user`);
   console.log(`管理员端入口: http://localhost:${PORT}/admin`);
 });
