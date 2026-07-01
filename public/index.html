@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>新闻院教室借用管理系统</title>
+  <link rel="icon" href="/img/favicon.png" type="image/png">
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .landing-page {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #2E5C8A 0%, #1A3A5C 100%);
+    }
+    .landing-card {
+      text-align: center;
+      max-width: 520px;
+      width: 90vw;
+    }
+    .landing-logo {
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 16px;
+      background: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    .landing-logo svg {
+      width: 48px;
+      height: 48px;
+    }
+    .landing-card h1 {
+      color: white;
+      font-size: 28px;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    .landing-card .subtitle {
+      color: rgba(255,255,255,0.75);
+      font-size: 14px;
+      margin-bottom: 32px;
+    }
+    .landing-links {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+    }
+    .landing-link {
+      background: white;
+      padding: 24px 32px;
+      border-radius: 12px;
+      text-decoration: none;
+      color: var(--text-primary);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+      transition: all 0.3s ease;
+      flex: 1;
+      max-width: 200px;
+    }
+    .landing-link:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    }
+    .landing-link .icon {
+      font-size: 28px;
+      margin-bottom: 12px;
+    }
+    .landing-link .title {
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .landing-link .desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+  </style>
+</head>
+<body>
+  <div class="landing-page">
+    <div class="landing-card">
+      <div class="landing-logo">
+        <img src="/img/favicon.png" alt="新闻与传播学院" style="width:72px;height:72px;border-radius:50%">
+      </div>
+      <h1>新闻院教室借用管理系统</h1>
+      <p class="subtitle">武汉大学新闻与传播学院 · 高效管理教室资源</p>
+      <div class="landing-links">
+        <a href="/user" class="landing-link">
+          <div class="icon">🎓</div>
+          <div class="title">用户端</div>
+          <div class="desc">浏览教室、提交申请</div>
+        </a>
+        <a href="/admin" class="landing-link">
+          <div class="icon">⚙️</div>
+          <div class="title">管理员端</div>
+          <div class="desc">审批管理、排班视图</div>
+        </a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
