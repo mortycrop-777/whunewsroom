@@ -15,8 +15,11 @@ COPY . .
 # 创建数据目录（SQLite 存放位置）
 RUN mkdir -p data
 
-# 暴露端口（腾讯云通过环境变量 PORT 注入）
-EXPOSE 3000
+# 设置环境变量，让应用监听 80 端口（与 K8s 探针端口对齐）
+ENV PORT=80
+
+# 暴露端口
+EXPOSE 80
 
 # 启动服务
 CMD ["node", "server.js"]
